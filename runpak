@@ -1,0 +1,88 @@
+#!/bin/sh
+
+usage() {
+  echo "$@" 1>&2
+  echo "usage: $0 [options] <files>"
+  echo "  -r,--run"
+  echo "  -C,--directory"
+  echo "  --"
+  exit 1
+}
+
+
+files=""
+
+add_file(){
+  files="$files '$1'"
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --)
+      shift 1;
+      while [ $# -gt 0 ]; do
+        add_file "$1"
+        shift 1
+      done
+      break;
+      ;;
+    -r|--run)
+      run=$2; shift 2
+      ;;
+    -o|--output)
+      output=$2; shift 2
+      ;;
+    -C|--directory)
+      directory=$2; shift 2
+      ;;
+    *)
+      echo "$1" | grep "^-" > /dev/null && {
+        usage "Unknown option '$1'. Use '--' before if it's a file."
+      } || {
+        add_file "$1"
+        shift 1
+      }
+      ;;
+  esac
+done
+
+
+test -z "$files" && {
+  usage "No files provided."
+}
+
+test -z "$run" && {
+  usage "No runnable."
+}
+
+test -z "$output" && {
+  output="packed"
+}
+
+test -z "$directory" && {
+  directory="."
+}
+
+set -e
+tar="/tmp/packed.tar"
+/bin/sh -c "tar -cvf '$tar' -C '$directory' $files"
+
+echo -n '' > "$output"
+echo "#!/bin/sh" >> "$output"
+echo 'set -e' >> "$output"
+echo '{' >> "$output"
+echo 'test -d /tmp && dir=/tmp || dir=.' >> "$output"
+echo 'dir="$dir/.tarexe/$(basename $0)"' >> "$output"
+echo 'mkdir -p "$dir"' >> "$output"
+echo 'dd iflag=skip_bytes skip=SKIP if="$0" | tar x -C "$dir"' >> "$output"
+echo '} 2> /dev/null 1>&2' >> "$output"
+echo "\"\$dir/$run\" \"\$@\"" >> "$output"
+
+echo 'exit' >> "$output"
+skip=$(cat "$output" | wc -c)
+skip_len=$(echo -n "$skip" | wc -c)
+skip=$(($skip - 4 + $skip_len))
+sed -i "s/SKIP/$skip/" "$output"
+
+cat "$tar" >> "$output"
+chmod +x "$output"
